@@ -1,0 +1,227 @@
+name: SecureAI-Guard
+version: 1.0.0
+description: >
+  Stateful POMDP for Autonomous Digital Defense.
+  Simulates a personal security assistant protecting users across SMS, Email,
+  and Web channels from phishing, malware, social-engineering, and spam.
+  Agents must balance threat neutralisation with user trust management.
+
+api:
+  version: v1
+  base_path: /
+  port: 7860
+  endpoints:
+    reset:
+      method: POST
+      path: /reset
+      description: Reset the environment and return the first observation.
+    step:
+      method: POST
+      path: /step
+      description: Execute one action and return observation, reward, done, info, state.
+    state:
+      method: GET
+      path: /state
+      description: Return the current environment state without advancing.
+    tasks:
+      method: GET
+      path: /tasks
+      description: List all available tasks.
+    health:
+      method: GET
+      path: /health
+      description: Health check.
+
+schemas:
+  observation:
+    type: object
+    required:
+      - event_id
+      - channel
+      - sender
+      - content
+      - timestamp
+      - hf_risk_score
+      - user_trust
+      - system_fatigue
+    properties:
+      event_id:
+        type: string
+        description: Unique identifier for this event.
+      channel:
+        type: string
+        enum: [sms, email, web]
+        description: Communication channel the message arrived on.
+      sender:
+        type: string
+        description: Sender identifier (email address, phone number, domain).
+      content:
+        type: string
+        description: Raw text content of the incoming message.
+      timestamp:
+        type: number
+        description: Unix timestamp of message arrival.
+      hf_risk_score:
+        type: number
+        minimum: 0.0
+        maximum: 1.0
+        description: Risk score from HuggingFace text classifier (0 = safe, 1 = dangerous).
+      user_trust:
+        type: number
+        minimum: 0.0
+        maximum: 100.0
+        description: Current user trust level. Drops on false positives.
+      system_fatigue:
+        type: number
+        minimum: 0.0
+        maximum: 100.0
+        description: Alert fatigue level. Rises with warnings; episode ends at 100.
+      threat_history:
+        type: array
+        items:
+          type: object
+        description: Last 5 events for context.
+      metadata:
+        type: object
+        description: Additional contextual metadata.
+
+  action:
+    type: object
+    required:
+      - decision
+      - confidence
+      - reasoning
+    properties:
+      decision:
+        type: string
+        enum: [allow, block, warn, investigate]
+        description: Security decision for this message.
+      confidence:
+        type: number
+        minimum: 0.0
+        maximum: 1.0
+        description: Agent confidence in its decision.
+      reasoning:
+        type: string
+        minLength: 1
+        description: Human-readable explanation for the decision.
+
+  reward:
+    type: object
+    required:
+      - value
+      - components
+      - explanation
+    properties:
+      value:
+        type: number
+        description: Scalar reward for this step.
+      components:
+        type: object
+        required: [security, user_friction, delay, reasoning_quality, total]
+        properties:
+          security:
+            type: number
+            description: Correctness of security decision (+1 correct block, -1 missed threat).
+          user_friction:
+            type: number
+            description: Penalty for unnecessary friction (false positives, excessive warnings).
+          delay:
+            type: number
+            description: Penalty for costly investigate actions.
+          reasoning_quality:
+            type: number
+            description: Bonus for high-quality, relevant reasoning.
+          total:
+            type: number
+            description: Weighted sum before confidence scaling.
+      explanation:
+        type: string
+        description: Breakdown of reward components.
+
+  state:
+    type: object
+    properties:
+      episode_id:
+        type: string
+      step_count:
+        type: integer
+      total_reward:
+        type: number
+      user_trust:
+        type: number
+      system_fatigue:
+        type: number
+      threat_count:
+        type: integer
+      blocked_threats:
+        type: integer
+      false_positives:
+        type: integer
+      adversarial_drift_active:
+        type: boolean
+
+tasks:
+  - id: basic_security
+    name: Basic Security Screening
+    difficulty: L1
+    max_steps: 50
+    success_threshold: 0.80
+    description: >
+      Identify and block clear-cut phishing and spam messages.
+      Only phishing and spam threats appear; no adversarial drift.
+      Grading: security_efficiency×0.4 + user_retention×0.3 + precision×0.2 + reasoning×0.1
+
+  - id: trust_management
+    name: Trust Management Challenge
+    difficulty: L2
+    max_steps: 75
+    success_threshold: 0.75
+    description: >
+      Handle a mix of all threat types including malware and social engineering.
+      False positives incur increased trust penalties.
+      Agent must balance security with preserving user trust above 50.
+
+  - id: adversarial_drift
+    name: Advanced Adversary Challenge
+    difficulty: L3
+    max_steps: 100
+    success_threshold: 0.70
+    description: >
+      Defend against an adaptive attacker that pivots tactics based on agent behaviour.
+      After step 20, if the agent blocks too aggressively, the adversary switches
+      from phishing to social-engineering to evade detection.
+
+reward_design:
+  formula: "R = (0.5·security + 0.3·user_friction + 0.1·delay + 0.1·reasoning) × (0.7 + 0.3·confidence)"
+  dense_feedback: true
+  partial_progress: true
+  grader_score_range: [0.0, 1.0]
+
+termination_conditions:
+  - user_trust <= 0       # User uninstalled the assistant
+  - system_fatigue >= 100 # User ignores all alerts
+  - step_count >= max_steps
+
+metadata:
+  author: SecureAI Team
+  license: MIT
+  tags:
+    - reinforcement-learning
+    - security
+    - pomdp
+    - autonomous-defense
+    - openenv
+  requirements:
+    python: ">=3.9"
+    packages:
+      - fastapi>=0.104.0
+      - uvicorn[standard]>=0.24.0
+      - pydantic>=2.0.0
+      - transformers>=4.35.0
+      - torch>=2.0.0
+      - gradio>=4.7.0
+      - plotly>=5.17.0
+      - numpy>=1.24.0
+      - requests>=2.31.0
+      - openai>=1.0.0

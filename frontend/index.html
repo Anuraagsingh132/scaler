@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SecureAI-Guard — SOC Dashboard</title>
+    <meta name="description" content="SecureAI-Guard Security Operations Center Dashboard — Real-time autonomous digital defense monitoring and control." />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+    <!-- ═══════════════════ HEADER ═══════════════════ -->
+    <header id="app-header">
+        <div class="header-left">
+            <div class="logo">
+                <div class="shield-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z"/>
+                        <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1>SecureAI-Guard</h1>
+                    <span class="subtitle">Security Operations Center</span>
+                </div>
+            </div>
+        </div>
+        <div class="header-center">
+            <div class="status-pill" id="status-pill">
+                <span class="pulse-dot"></span>
+                <span id="status-text">Connecting…</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="header-stat">
+                <span class="stat-label">Episode</span>
+                <span class="stat-value" id="header-episode">—</span>
+            </div>
+            <div class="header-stat">
+                <span class="stat-label">Steps</span>
+                <span class="stat-value" id="header-steps">0</span>
+            </div>
+            <div class="header-stat">
+                <span class="stat-label">Score</span>
+                <span class="stat-value" id="header-score">0.0000</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ═══════════════════ MAIN LAYOUT ═══════════════════ -->
+    <main id="app-main">
+        <!-- ──── SIDEBAR ──── -->
+        <aside id="sidebar">
+            <section class="sidebar-section">
+                <h2 class="section-title"><span class="icon">🎛️</span> Control Panel</h2>
+                <div class="form-group">
+                    <label for="task-select">Mission Type</label>
+                    <select id="task-select">
+                        <option value="basic_security">L1 — Basic Security</option>
+                        <option value="trust_management">L2 — Trust Management</option>
+                        <option value="adversarial_drift">L3 — Adversarial Drift</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="seed-input">Seed (reproducibility)</label>
+                    <input type="number" id="seed-input" value="42" min="0" />
+                </div>
+                <button id="btn-reset" class="btn btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Start Episode
+                </button>
+                <button id="btn-auto-step" class="btn btn-accent" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="5 4 15 12 5 20"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+                    AI Auto Step
+                </button>
+                <button id="btn-run-all" class="btn btn-ghost" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="5 3 19 12 5 21 5 3"/><polygon points="13 3 27 12 13 21 13 3" transform="translate(-4,0)"/></svg>
+                    Run Full Episode
+                </button>
+            </section>
+
+            <section class="sidebar-section">
+                <h2 class="section-title"><span class="icon">🧑‍💻</span> Human Override</h2>
+                <div class="form-group">
+                    <label>Decision</label>
+                    <div class="radio-group" id="decision-group">
+                        <label class="radio-card" data-value="allow">
+                            <input type="radio" name="decision" value="allow" />
+                            <span class="radio-icon safe">✓</span>
+                            <span>Allow</span>
+                        </label>
+                        <label class="radio-card" data-value="block">
+                            <input type="radio" name="decision" value="block" />
+                            <span class="radio-icon danger">✕</span>
+                            <span>Block</span>
+                        </label>
+                        <label class="radio-card" data-value="warn">
+                            <input type="radio" name="decision" value="warn" />
+                            <span class="radio-icon warning">⚠</span>
+                            <span>Warn</span>
+                        </label>
+                        <label class="radio-card active" data-value="investigate">
+                            <input type="radio" name="decision" value="investigate" checked />
+                            <span class="radio-icon info">🔍</span>
+                            <span>Investigate</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="confidence-slider">Confidence: <span id="confidence-value">0.70</span></label>
+                    <input type="range" id="confidence-slider" min="0" max="1" step="0.01" value="0.70" />
+                </div>
+                <div class="form-group">
+                    <label for="reasoning-input">Reasoning</label>
+                    <textarea id="reasoning-input" placeholder="Explain your decision…" rows="3"></textarea>
+                </div>
+                <button id="btn-human-step" class="btn btn-secondary" disabled>
+                    Submit Human Action
+                </button>
+            </section>
+
+            <section class="sidebar-section task-info-section" id="task-info-section" style="display:none;">
+                <h2 class="section-title"><span class="icon">📋</span> Task Details</h2>
+                <div id="task-info-content"></div>
+            </section>
+        </aside>
+
+        <!-- ──── CONTENT AREA ──── -->
+        <div id="content">
+            <!-- Gauges Row -->
+            <div class="gauges-row" id="gauges-row">
+                <div class="gauge-card" id="gauge-trust">
+                    <div class="gauge-ring">
+                        <svg viewBox="0 0 120 120">
+                            <circle class="gauge-track" cx="60" cy="60" r="52" />
+                            <circle class="gauge-fill trust-fill" cx="60" cy="60" r="52" id="trust-ring" />
+                        </svg>
+                        <div class="gauge-value" id="trust-value">100</div>
+                    </div>
+                    <div class="gauge-label">User Trust</div>
+                    <div class="gauge-sub" id="trust-sub">Excellent</div>
+                </div>
+                <div class="gauge-card" id="gauge-fatigue">
+                    <div class="gauge-ring">
+                        <svg viewBox="0 0 120 120">
+                            <circle class="gauge-track" cx="60" cy="60" r="52" />
+                            <circle class="gauge-fill fatigue-fill" cx="60" cy="60" r="52" id="fatigue-ring" />
+                        </svg>
+                        <div class="gauge-value" id="fatigue-value">0</div>
+                    </div>
+                    <div class="gauge-label">System Fatigue</div>
+                    <div class="gauge-sub" id="fatigue-sub">Low</div>
+                </div>
+                <div class="gauge-card" id="gauge-risk">
+                    <div class="gauge-ring">
+                        <svg viewBox="0 0 120 120">
+                            <circle class="gauge-track" cx="60" cy="60" r="52" />
+                            <circle class="gauge-fill risk-fill" cx="60" cy="60" r="52" id="risk-ring" />
+                        </svg>
+                        <div class="gauge-value" id="risk-value">0</div>
+                    </div>
+                    <div class="gauge-label">Risk Level</div>
+                    <div class="gauge-sub" id="risk-sub">Safe</div>
+                </div>
+                <div class="gauge-card stat-card">
+                    <div class="mini-stats">
+                        <div class="mini-stat">
+                            <span class="mini-stat-value" id="stat-threats">0</span>
+                            <span class="mini-stat-label">Threats Blocked</span>
+                        </div>
+                        <div class="mini-stat">
+                            <span class="mini-stat-value danger-text" id="stat-fp">0</span>
+                            <span class="mini-stat-label">False Positives</span>
+                        </div>
+                        <div class="mini-stat">
+                            <span class="mini-stat-value" id="stat-total-reward">0.0000</span>
+                            <span class="mini-stat-label">Total Reward</span>
+                        </div>
+                        <div class="mini-stat">
+                            <span class="mini-stat-value" id="stat-difficulty">—</span>
+                            <span class="mini-stat-label">Difficulty</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Current Event Preview -->
+            <div class="event-preview-card glass-card" id="current-event-card" style="display:none;">
+                <div class="event-preview-header">
+                    <h3><span class="icon">📨</span> Incoming Message</h3>
+                    <div class="event-badges">
+                        <span class="badge" id="event-channel-badge">—</span>
+                        <span class="badge" id="event-threat-badge">—</span>
+                    </div>
+                </div>
+                <div class="event-preview-body">
+                    <div class="event-sender"><strong>From:</strong> <span id="event-sender">—</span></div>
+                    <div class="event-content" id="event-content">—</div>
+                </div>
+                <div class="event-preview-footer">
+                    <span>Risk Score: <strong id="event-risk-score">—</strong></span>
+                </div>
+            </div>
+
+            <!-- Bottom Row: Event Feed + Charts -->
+            <div class="bottom-row">
+                <div class="event-feed glass-card">
+                    <h3 class="card-title"><span class="icon">📋</span> Event Feed</h3>
+                    <div class="table-wrapper">
+                        <table id="event-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Time</th>
+                                    <th>Channel</th>
+                                    <th>Sender</th>
+                                    <th>Content</th>
+                                    <th>Threat</th>
+                                    <th>Decision</th>
+                                    <th>Reward</th>
+                                </tr>
+                            </thead>
+                            <tbody id="event-tbody">
+                                <tr class="empty-row">
+                                    <td colspan="8">No events yet. Start an episode to begin monitoring.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="charts-panel">
+                    <div class="chart-card glass-card">
+                        <h3 class="card-title"><span class="icon">🧠</span> Reward Breakdown</h3>
+                        <div class="reward-bars" id="reward-bars">
+                            <div class="reward-bar-item">
+                                <div class="bar-label">Security</div>
+                                <div class="bar-track"><div class="bar-fill security-bar" id="bar-security" style="width:0%"></div></div>
+                                <div class="bar-value" id="val-security">0.00</div>
+                            </div>
+                            <div class="reward-bar-item">
+                                <div class="bar-label">Friction</div>
+                                <div class="bar-track"><div class="bar-fill friction-bar" id="bar-friction" style="width:0%"></div></div>
+                                <div class="bar-value" id="val-friction">0.00</div>
+                            </div>
+                            <div class="reward-bar-item">
+                                <div class="bar-label">Delay</div>
+                                <div class="bar-track"><div class="bar-fill delay-bar" id="bar-delay" style="width:0%"></div></div>
+                                <div class="bar-value" id="val-delay">0.00</div>
+                            </div>
+                            <div class="reward-bar-item">
+                                <div class="bar-label">Reasoning</div>
+                                <div class="bar-track"><div class="bar-fill reasoning-bar" id="bar-reasoning" style="width:0%"></div></div>
+                                <div class="bar-value" id="val-reasoning">0.00</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chart-card glass-card">
+                        <h3 class="card-title"><span class="icon">📈</span> Reward Trend</h3>
+                        <canvas id="reward-chart" height="160"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Grade Banner (shown at episode end) -->
+            <div class="grade-banner glass-card" id="grade-banner" style="display:none;">
+                <div class="grade-icon" id="grade-icon">🏆</div>
+                <div class="grade-info">
+                    <h2 id="grade-title">Episode Complete</h2>
+                    <div class="grade-details">
+                        <span>Score: <strong id="grade-score">—</strong></span>
+                        <span>Grade: <strong id="grade-letter">—</strong></span>
+                        <span>Passed: <strong id="grade-passed">—</strong></span>
+                    </div>
+                </div>
+                <button class="btn btn-primary" id="btn-new-episode">New Episode</button>
+            </div>
+        </div>
+    </main>
+
+    <!-- ═══════════════════ TOAST NOTIFICATIONS ═══════════════════ -->
+    <div id="toast-container"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
