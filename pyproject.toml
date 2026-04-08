@@ -16,3 +16,6 @@ dependencies = [
     "requests>=2.31.0",
     "openai>=1.0.0",
 ]
+
+[project.scripts]
+server = "app:main"

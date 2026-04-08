@@ -215,15 +215,9 @@ async def dashboard():
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="frontend")
 
 
-if __name__ == "__main__":
-    import webbrowser
-    import threading
-
-    def open_browser():
-        """Open the dashboard in the default browser after a short delay."""
-        import time
-        time.sleep(1.5)
-        webbrowser.open("http://localhost:7860/dashboard")
-
-    threading.Thread(target=open_browser, daemon=True).start()
+def main():
     uvicorn.run("app:app", host="0.0.0.0", port=7860, log_level="info")
+
+
+if __name__ == "__main__":
+    main()
