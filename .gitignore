@@ -17,4 +17,3 @@ get-pip.py
 .uv-cache/
 server/
 uv.lock
-pyproject.toml
