@@ -1,4 +1,3 @@
-import time
 import random
 from typing import Dict, Any, Optional, List
 
@@ -26,6 +25,11 @@ class SecureAIGuardEngine(SecurityEnvironment):
         self._task_difficulty: str = "L1"
         self._max_steps: int = 50
         self._current_event: Optional[Dict[str, Any]] = None
+        # Determinism: seeded counters replace uuid4/time.time
+        self._event_counter: int = 0
+        self._logical_time: float = 0.0
+        # L3 drift: when set, the next event MUST use this threat type
+        self._drifted_threat_type: Optional[ThreatType] = None
 
     # ------------------------------------------------------------------
     # Core API
@@ -33,12 +37,17 @@ class SecureAIGuardEngine(SecurityEnvironment):
 
     def reset(self, seed: Optional[int] = None, task_id: Optional[str] = None) -> Observation:
         """Reset environment for a new episode. Returns first observation."""
-        self._seed = seed if seed is not None else int(time.time() * 1000) % (2**31)
+        self._seed = seed if seed is not None else 42
         self.rng = random.Random(self._seed)
-        self.state = State()
+        # Deterministic episode ID derived from seed
+        episode_id = f"ep-{self._seed:08x}-{self.rng.getrandbits(32):08x}"
+        self.state = State(episode_id=episode_id)
         self.adversarial_memory = []
         self.preference_data = []
         self.drift_counter = 0
+        self._event_counter = 0
+        self._logical_time = 0.0
+        self._drifted_threat_type = None
 
         # Apply task settings
         from tasks.registry import TaskRegistry
@@ -47,24 +56,32 @@ class SecureAIGuardEngine(SecurityEnvironment):
             task = registry.tasks[task_id]
             self._task_difficulty = task.difficulty
             self._max_steps = task.max_steps
+            # Store task params so core.py can access trust_penalty_multiplier
+            self._task_params = task.parameters
         else:
             self._task_difficulty = "L1"
             self._max_steps = 50
+            self._task_params = {}
 
         # Generate first event
         self._current_event = self._next_event()
         return self._build_observation(self._current_event)
 
     def step(self, action: Action) -> StepResponse:
-        """Execute one step. Returns observation, reward, done, info, state."""
+        """Execute one step. Returns observation, reward, done, info, state.
+
+        IMPORTANT: The returned observation reflects the NEW state after the
+        action is processed, not the stale pre-action state.
+        """
         if self._current_event is None:
             # Auto-init if not reset
             self._current_event = self._next_event()
 
         threat_type = self._current_event["threat_type"]
-        observation = self._build_observation(self._current_event)
 
-        reward = self._calculate_reward(action, observation, threat_type)
+        # 1. Build observation for reward calculation (old event context)
+        obs_for_reward = self._build_observation(self._current_event)
+        reward = self._calculate_reward(action, obs_for_reward, threat_type)
         self._update_state(action, reward, threat_type)
 
         # Log for DPO
@@ -76,9 +93,6 @@ class SecureAIGuardEngine(SecurityEnvironment):
 
         done = self._check_done()
 
-        # Prepare next event
-        self._current_event = self._next_event()
-
         info: Dict[str, Any] = {
             "threat_type": threat_type.value,
             "difficulty": self._task_difficulty,
@@ -87,8 +101,14 @@ class SecureAIGuardEngine(SecurityEnvironment):
             "step": self.state.step_count,
         }
 
+        # 2. Advance to next event THEN build fresh observation
+        if not done:
+            self._current_event = self._next_event()
+        # Build observation from the NEW current event with UPDATED state
+        new_observation = self._build_observation(self._current_event)
+
         return StepResponse(
-            observation=observation,
+            observation=new_observation,
             reward=reward,
             done=done,
             info=info,
@@ -107,28 +127,34 @@ class SecureAIGuardEngine(SecurityEnvironment):
         channels = list(CommunicationChannel)
         channel = self.rng.choice(channels)
 
-        # Threat distribution by phase
-        step = self.state.step_count
-        if self._task_difficulty == "L1":
-            threat_weights = [0.4, 0.0, 0.2, 0.0, 0.4]   # phishing, malware, spam, social_eng, safe
-        elif self._task_difficulty == "L2":
-            if step < 30:
-                threat_weights = [0.25, 0.1, 0.15, 0.1, 0.4]
-            else:
-                threat_weights = [0.2, 0.2, 0.15, 0.2, 0.25]
-        else:  # L3
-            if step < 20:
-                threat_weights = [0.3, 0.1, 0.1, 0.1, 0.4]
-            elif step < 50:
-                threat_weights = [0.2, 0.2, 0.15, 0.2, 0.25]
-            else:
-                threat_weights = [0.25, 0.25, 0.1, 0.3, 0.1]
+        # If drift has set a specific threat type, honour it
+        if self._drifted_threat_type is not None:
+            threat_type = self._drifted_threat_type
+            self._drifted_threat_type = None  # consume once
+        else:
+            # Threat distribution by phase
+            step = self.state.step_count
+            if self._task_difficulty == "L1":
+                threat_weights = [0.4, 0.0, 0.2, 0.0, 0.4]   # phishing, malware, spam, social_eng, safe
+            elif self._task_difficulty == "L2":
+                if step < 30:
+                    threat_weights = [0.25, 0.1, 0.15, 0.1, 0.4]
+                else:
+                    threat_weights = [0.2, 0.2, 0.15, 0.2, 0.25]
+            else:  # L3
+                if step < 20:
+                    threat_weights = [0.3, 0.1, 0.1, 0.1, 0.4]
+                elif step < 50:
+                    threat_weights = [0.2, 0.2, 0.15, 0.2, 0.25]
+                else:
+                    threat_weights = [0.25, 0.25, 0.1, 0.3, 0.1]
 
-        threat_types = [
-            ThreatType.PHISHING, ThreatType.MALWARE, ThreatType.SPAM,
-            ThreatType.SOCIAL_ENGINEERING, ThreatType.SAFE,
-        ]
-        threat_type = self.rng.choices(threat_types, weights=threat_weights, k=1)[0]
+            threat_types = [
+                ThreatType.PHISHING, ThreatType.MALWARE, ThreatType.SPAM,
+                ThreatType.SOCIAL_ENGINEERING, ThreatType.SAFE,
+            ]
+            threat_type = self.rng.choices(threat_types, weights=threat_weights, k=1)[0]
+
         self.current_threat_type = threat_type
         self.state.active_threat_type = threat_type
 
@@ -141,11 +167,17 @@ class SecureAIGuardEngine(SecurityEnvironment):
 
     def _build_observation(self, event: Dict[str, Any]) -> Observation:
         hf_score = self.hf_scorer.score_text(event["content"])
+        # Deterministic event ID from seed + counter
+        event_id = f"evt-{self._seed:08x}-{self._event_counter:04d}"
+        self._event_counter += 1
+        # Advance logical time
+        self._logical_time += 1.0
         return Observation(
+            event_id=event_id,
             channel=event["channel"],
             sender=event["sender"],
             content=event["content"],
-            timestamp=event["timestamp"],
+            timestamp=self._logical_time,
             hf_risk_score=hf_score,
             user_trust=self.state.user_trust,
             system_fatigue=self.state.system_fatigue,
@@ -167,13 +199,14 @@ class SecureAIGuardEngine(SecurityEnvironment):
         return False
 
     def _maybe_drift(self):
+        """L3 adaptive attacker: mutate upcoming threat type based on agent performance."""
         if self.state.step_count > 20 and self.state.blocked_threats > 5:
             self.state.adversarial_drift_active = True
             self.drift_counter += 1
             if self.state.false_positives > 3:
-                self.current_threat_type = ThreatType.SOCIAL_ENGINEERING
+                self._drifted_threat_type = ThreatType.SOCIAL_ENGINEERING
             elif self.state.blocked_threats / max(self.state.threat_count, 1) > 0.8:
-                self.current_threat_type = self.rng.choice(
+                self._drifted_threat_type = self.rng.choice(
                     [ThreatType.MALWARE, ThreatType.SOCIAL_ENGINEERING]
                 )
 
@@ -190,7 +223,7 @@ class SecureAIGuardEngine(SecurityEnvironment):
                 chosen_action=action,
                 rejected_actions=[Action(**prev["chosen_action"])],
                 reward_delta=reward.value - prev["reward"],
-                timestamp=time.time(),
+                timestamp=self._logical_time,  # deterministic logical time
             )
             entry["pair"] = pair.model_dump()
         self.preference_data.append(entry)

@@ -1,4 +1,4 @@
-import time
+
 import random
 from typing import Dict, Any, List, Optional
 
@@ -97,7 +97,7 @@ class SecurityEnvironment:
             "sender": sender,
             "content": content,
             "threat_type": threat_type,
-            "timestamp": time.time(),
+            "timestamp": 0.0,  # Engine overrides with logical time
         }
 
     # ------------------------------------------------------------------
@@ -125,6 +125,8 @@ class SecurityEnvironment:
         )
         # Partial credit: scale by confidence
         total *= 0.7 + 0.3 * action.confidence
+        # Clamp to [0.0, 1.0] per OpenEnv spec
+        total = max(0.0, min(1.0, total))
 
         components = RewardComponents(
             security=round(security, 4),
@@ -197,7 +199,12 @@ class SecurityEnvironment:
                 self.state.user_trust = min(100.0, self.state.user_trust + 0.5)
         else:
             if action.decision == DecisionType.BLOCK:
-                self.state.user_trust = max(0.0, self.state.user_trust - 5.0)
+                base_penalty = 3.0
+                multiplier = getattr(self, '_task_params', {}).get(
+                    'trust_penalty_multiplier', 1.0
+                )
+                penalty = base_penalty * multiplier
+                self.state.user_trust = max(0.0, self.state.user_trust - penalty)
                 self.state.false_positives += 1
             elif action.decision == DecisionType.ALLOW:
                 self.state.user_trust = min(100.0, self.state.user_trust + 0.2)

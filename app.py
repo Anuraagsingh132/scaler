@@ -84,6 +84,40 @@ async def health():
     return {"status": "healthy", "version": "1.0.0"}
 
 
+@app.get("/metadata")
+async def metadata():
+    """OpenEnv metadata endpoint for runtime validation."""
+    return {
+        "name": "SecureAI-Guard",
+        "description": "Stateful POMDP for autonomous digital defense across SMS, email, and web.",
+        "version": "1.0.0",
+    }
+
+
+@app.get("/schema")
+async def schema():
+    """Return action/observation/state schemas for OpenEnv runtime validation."""
+    return {
+        "action": Action.model_json_schema(),
+        "observation": Observation.model_json_schema(),
+        "state": State.model_json_schema(),
+    }
+
+
+@app.post("/mcp")
+async def mcp(payload: Optional[Dict[str, Any]] = None):
+    """Minimal JSON-RPC-compatible stub so runtime validators can reach /mcp."""
+    request_id = payload.get("id") if isinstance(payload, dict) else None
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "error": {
+            "code": -32601,
+            "message": "MCP endpoint is not implemented for this environment.",
+        },
+    }
+
+
 @app.post("/reset")
 async def reset(request: ResetRequest):
     """Reset environment. Returns first observation."""

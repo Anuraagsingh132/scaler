@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Any, Optional, Literal
 from enum import Enum
-import uuid
+
 
 
 class DecisionType(str, Enum):
@@ -39,7 +39,7 @@ class Action(BaseModel):
 
 
 class Observation(BaseModel):
-    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    event_id: str = Field(default="")
     channel: CommunicationChannel
     sender: str
     content: str
@@ -66,7 +66,7 @@ class Reward(BaseModel):
 
 
 class State(BaseModel):
-    episode_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    episode_id: str = Field(default="")
     step_count: int = 0
     total_reward: float = 0.0
     user_trust: float = 100.0

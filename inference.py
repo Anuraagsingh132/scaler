@@ -1,52 +1,50 @@
 """
-inference.py — SecureAI-Guard baseline inference script.
+inference.py — SecureAI-Guard baseline inference script (OpenEnv compliant).
 
-Reads environment variables:
-    API_BASE_URL  : base URL of the SecureAI-Guard environment server
-    MODEL_NAME    : OpenAI-compatible model name for the LLM agent
-    HF_TOKEN      : HuggingFace token (optional, passed to model calls)
+Environment variables:
+    API_BASE_URL  : base URL for the OpenAI-compatible LLM endpoint
+    MODEL_NAME    : model name passed to the LLM client
+    HF_TOKEN      : API key for the LLM endpoint (also aliased as API_KEY)
+    ENV_URL       : URL of the local SecureAI-Guard environment server
+                    (default: http://localhost:7860)
 
-Logging format (required by OpenEnv):
-    [START] ...episode metadata...
-    [STEP]  ...per-step data...
-    [END]   ...episode summary...
+Stdout logging format (required by OpenEnv — single lines, no extras):
+    [START] task=<task_name> env=SecureAI-Guard model=<model_name>
+    [STEP]  step=<n> action=<action> reward=<0.00> done=<true|false> error=<msg|null>
+    [END]   success=<true|false> steps=<n> score=<0.00> rewards=<r1,r2,...,rn>
 
 Usage:
-    export API_BASE_URL=http://localhost:7860
-    export MODEL_NAME=gpt-3.5-turbo
+    export API_BASE_URL=https://api-inference.huggingface.co/v1
+    export MODEL_NAME=meta-llama/Llama-3-8B-Instruct
     export HF_TOKEN=hf_...
+    export ENV_URL=http://localhost:7860
     python inference.py
 """
 
 import json
-import logging
 import os
 import sys
-import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List
 
 import requests
 
 # ---------------------------------------------------------------------------
-# Logging setup — plain stdout so automated validators can parse the tags
-# ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
-logger = logging.getLogger("inference")
-
-# ---------------------------------------------------------------------------
 # Configuration from environment variables
 # ---------------------------------------------------------------------------
-API_BASE_URL: str = os.environ.get("API_BASE_URL", "http://localhost:7860")
+# LLM-only variables — NEVER used for the environment server
+API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME: str = os.environ.get("MODEL_NAME", "gpt-3.5-turbo")
-HF_TOKEN: str = os.environ.get("HF_TOKEN", "")
+HF_TOKEN = os.getenv("HF_TOKEN")
+API_KEY = os.getenv("API_KEY") or HF_TOKEN
+
+# Environment server URL — completely separate from the LLM
+ENV_URL: str = os.environ.get("ENV_URL", "http://localhost:7860")
 
 TASKS = ["basic_security", "trust_management", "adversarial_drift"]
 EPISODES_PER_TASK = int(os.environ.get("EPISODES_PER_TASK", "1"))
 SEED_BASE = int(os.environ.get("SEED_BASE", "42"))
+
+BENCHMARK_NAME = "SecureAI-Guard"
 
 
 # ---------------------------------------------------------------------------
@@ -54,19 +52,16 @@ SEED_BASE = int(os.environ.get("SEED_BASE", "42"))
 # ---------------------------------------------------------------------------
 def call_llm(prompt: str, system: str = "") -> str:
     """
-    Call an OpenAI-compatible endpoint.
-    Falls back to a deterministic rule-based decision when the endpoint
-    is unavailable (so the script is always runnable end-to-end).
+    Call an OpenAI-compatible endpoint using API_BASE_URL + API_KEY.
+    Falls back to a deterministic rule-based decision when the key is
+    missing or the endpoint is unreachable.
     """
-    openai_base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
-
-    if openai_key:
+    if API_KEY:
         try:
             from openai import OpenAI
 
-            client = OpenAI(api_key=openai_key, base_url=openai_base)
-            messages = []
+            client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+            messages: list = []
             if system:
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
@@ -78,8 +73,8 @@ def call_llm(prompt: str, system: str = "") -> str:
                 temperature=0.0,
             )
             return response.choices[0].message.content.strip()
-        except Exception as exc:
-            logger.warning("LLM call failed (%s). Using rule-based fallback.", exc)
+        except Exception:
+            pass  # fall through to rule-based
 
     # Rule-based fallback — deterministic, no network needed
     return _rule_based_decision(prompt)
@@ -166,17 +161,17 @@ def build_prompt(obs: Dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Environment helpers
+# Environment helpers — use ENV_URL (NOT API_BASE_URL)
 # ---------------------------------------------------------------------------
 def env_reset(task_id: str, seed: int) -> Dict[str, Any]:
-    url = f"{API_BASE_URL}/reset"
+    url = f"{ENV_URL}/reset"
     resp = requests.post(url, json={"task_id": task_id, "seed": seed}, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
 
 def env_step(action: Dict[str, Any]) -> Dict[str, Any]:
-    url = f"{API_BASE_URL}/step"
+    url = f"{ENV_URL}/step"
     resp = requests.post(url, json={"action": action}, timeout=30)
     resp.raise_for_status()
     return resp.json()
@@ -207,128 +202,117 @@ def parse_action(llm_output: str) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Strict OpenEnv stdout logging helpers
+# ---------------------------------------------------------------------------
+def _fmt_bool(v: bool) -> str:
+    """Return lowercase 'true' or 'false'."""
+    return "true" if v else "false"
+
+
+def _log_start(task_name: str, model_name: str) -> None:
+    print(f"[START] task={task_name} env={BENCHMARK_NAME} model={model_name}", flush=True)
+
+
+def _log_step(step: int, action: str, reward: float, done: bool, error: str | None) -> None:
+    err_str = "null" if error is None else error
+    print(
+        f"[STEP] step={step} action={action} reward={reward:.2f} "
+        f"done={_fmt_bool(done)} error={err_str}",
+        flush=True,
+    )
+
+
+def _log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={_fmt_bool(success)} steps={steps} "
+        f"score={score:.2f} rewards={rewards_str}",
+        flush=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main inference loop
 # ---------------------------------------------------------------------------
-def run_episode(task_id: str, seed: int, episode_num: int) -> Dict[str, Any]:
-    reset_data = env_reset(task_id, seed)
-    obs = reset_data["observation"]
-
-    episode_summary: Dict[str, Any] = {
-        "task_id": task_id,
-        "seed": seed,
-        "episode": episode_num,
-        "steps": [],
-        "total_reward": 0.0,
-        "final_score": None,
-        "grade": None,
-    }
-
-    logger.info(
-        "[START] task=%s episode=%d seed=%d model=%s api=%s",
-        task_id,
-        episode_num,
-        seed,
-        MODEL_NAME,
-        API_BASE_URL,
-    )
+def run_episode(task_id: str, seed: int) -> Dict[str, Any]:
+    _log_start(task_id, MODEL_NAME)
 
     step_num = 0
     done = False
+    all_rewards: List[float] = []
+    final_score: float = 0.0
+    success: bool = False
+    obs: Dict[str, Any] | None = None
+
+    try:
+        reset_data = env_reset(task_id, seed)
+        obs = reset_data["observation"]
+    except Exception as exc:
+        error_msg = str(exc).replace("\n", " ")
+        _log_end(False, 0, 0.0, all_rewards)
+        return {
+            "task_id": task_id,
+            "seed": seed,
+            "steps": 0,
+            "total_reward": 0.0,
+            "final_score": 0.0,
+            "success": False,
+            "error": error_msg,
+        }
 
     while not done:
         step_num += 1
 
-        # Build prompt and get action from LLM
-        prompt = build_prompt(obs)
-        llm_output = call_llm(prompt, system=SYSTEM_PROMPT)
-        action = parse_action(llm_output)
+        try:
+            # Build prompt and get action from LLM
+            prompt = build_prompt(obs)
+            llm_output = call_llm(prompt, system=SYSTEM_PROMPT)
+            action = parse_action(llm_output)
 
-        # Step environment
-        step_data = env_step(action)
-        reward_val = step_data["reward"]["value"]
-        episode_summary["total_reward"] += reward_val
-        done = step_data["done"]
+            # Step environment
+            step_data = env_step(action)
+            reward_val: float = step_data["reward"]["value"]
+            done = step_data["done"]
+            all_rewards.append(reward_val)
 
-        step_log = {
-            "step": step_num,
-            "channel": obs["channel"],
-            "sender": obs["sender"],
-            "decision": action["decision"],
-            "confidence": action["confidence"],
-            "reward": reward_val,
-            "user_trust": step_data["state"]["user_trust"],
-            "system_fatigue": step_data["state"]["system_fatigue"],
-            "threat_type": step_data["info"].get("threat_type", "unknown"),
-            "done": done,
-        }
-        episode_summary["steps"].append(step_log)
+            _log_step(step_num, action["decision"], reward_val, done, None)
 
-        logger.info(
-            "[STEP] step=%d decision=%s confidence=%.2f reward=%.4f "
-            "trust=%.1f fatigue=%.1f threat=%s",
-            step_num,
-            action["decision"],
-            action["confidence"],
-            reward_val,
-            step_data["state"]["user_trust"],
-            step_data["state"]["system_fatigue"],
-            step_data["info"].get("threat_type", "unknown"),
-        )
+            # Advance observation to the NEW state
+            obs = step_data["observation"]
 
-        # Advance observation
-        obs = step_data["observation"]
+            # Retrieve grade if episode ended
+            if done and "grade" in step_data:
+                grade_data = step_data["grade"]
+                final_score = float(grade_data.get("score", 0.0))
+                success = bool(grade_data.get("passed", False))
 
-        # Retrieve grade if episode ended
-        if done and "grade" in step_data:
-            grade_data = step_data["grade"]
-            episode_summary["final_score"] = grade_data.get("score")
-            episode_summary["grade"] = grade_data.get("grade")
+        except Exception as exc:
+            error_msg = str(exc).replace("\n", " ")
+            _log_step(step_num, "error", 0.0, True, error_msg)
+            done = True
 
-    episode_summary["total_reward"] = round(episode_summary["total_reward"], 4)
+    _log_end(success, step_num, final_score, all_rewards)
 
-    logger.info(
-        "[END] task=%s episode=%d steps=%d total_reward=%.4f score=%s grade=%s",
-        task_id,
-        episode_num,
-        step_num,
-        episode_summary["total_reward"],
-        episode_summary.get("final_score"),
-        episode_summary.get("grade"),
-    )
-
-    return episode_summary
+    return {
+        "task_id": task_id,
+        "seed": seed,
+        "steps": step_num,
+        "total_reward": round(sum(all_rewards), 4),
+        "final_score": final_score,
+        "success": success,
+    }
 
 
 def main():
-    logger.info("=== SecureAI-Guard Inference ===")
-    logger.info("API_BASE_URL : %s", API_BASE_URL)
-    logger.info("MODEL_NAME   : %s", MODEL_NAME)
-    logger.info("HF_TOKEN     : %s", "set" if HF_TOKEN else "not set")
-
-    all_results = []
+    all_results: List[Dict[str, Any]] = []
     global_episode = 0
 
     for task_id in TASKS:
-        for ep_idx in range(EPISODES_PER_TASK):
+        for _ in range(EPISODES_PER_TASK):
             global_episode += 1
             seed = SEED_BASE + global_episode
-            try:
-                summary = run_episode(task_id, seed, global_episode)
-                all_results.append(summary)
-            except Exception as exc:
-                logger.error("Episode failed: task=%s episode=%d error=%s", task_id, global_episode, exc)
-
-    # Aggregate summary
-    if all_results:
-        avg_reward = sum(r["total_reward"] for r in all_results) / len(all_results)
-        scored = [r for r in all_results if r["final_score"] is not None]
-        avg_score = sum(r["final_score"] for r in scored) / len(scored) if scored else None
-        logger.info(
-            "=== SUMMARY === episodes=%d avg_reward=%.4f avg_score=%s",
-            len(all_results),
-            avg_reward,
-            f"{avg_score:.4f}" if avg_score is not None else "n/a",
-        )
+            result = run_episode(task_id, seed)
+            all_results.append(result)
 
 
 if __name__ == "__main__":

@@ -29,15 +29,18 @@ This environment is fully compliant with the [OpenEnv specification](https://ope
 
 ## 🏗️ Project Structure
 
-```
+```text
 SecureAI-Guard/
 ├── app.py                   # FastAPI environment server (port 7860)
-├── ui.py                    # Gradio SOC dashboard (port 7861)
-├── inference.py             # ⭐ Required baseline inference script
+├── inference.py             # Required baseline inference script
 ├── dqn_baseline.py          # Dueling DQN training script
 ├── openenv.yaml             # OpenEnv manifest
 ├── requirements.txt
 ├── Dockerfile
+├── frontend/
+│   ├── index.html           # Browser dashboard shell
+│   ├── app.js               # Dashboard logic
+│   └── styles.css           # Dashboard styling
 ├── schema/
 │   └── models.py            # Pydantic v2 typed models
 ├── env/
@@ -73,19 +76,17 @@ python app.py
 ### 2. Run the Baseline Inference Script
 
 ```bash
-export API_BASE_URL=http://localhost:7860
-export MODEL_NAME=gpt-3.5-turbo          # any OpenAI-compatible model
-export OPENAI_API_KEY=sk-...             # optional; uses rule-based fallback if absent
-export HF_TOKEN=hf_...                   # optional
+export API_BASE_URL=https://router.huggingface.co/v1   # LLM endpoint
+export MODEL_NAME=gpt-4o-mini                         # any OpenAI-compatible model
+export HF_TOKEN=hf_...                                # or API_KEY
+export ENV_URL=http://localhost:7860                  # environment server
 python inference.py
 ```
 
 ### 3. Launch the SOC Dashboard (optional)
 
-```bash
-python ui.py
-# Gradio dashboard at http://localhost:7861
-```
+Visit `http://localhost:7860/dashboard` in your browser.
+The dashboard is served directly by the FastAPI app.
 
 ### 4. Train the DQN Agent (optional)
 
@@ -285,17 +286,19 @@ An episode ends when any of the following conditions is met:
 `inference.py` is the required OpenEnv baseline script. It:
 
 - Reads `API_BASE_URL`, `MODEL_NAME`, and `HF_TOKEN` from environment variables
-- Uses the OpenAI client for LLM inference (with deterministic keyword fallback when no API key is set)
+- Uses the OpenAI client for LLM inference via `API_BASE_URL`
+- Connects to the environment server via `ENV_URL`
+- Falls back to a deterministic rule-based policy when no API key is set
 - Runs all three tasks sequentially
 - Produces reproducible results with `SEED_BASE` control
 - Logs in the required format:
 
 ```
-[START] task=basic_security episode=1 seed=43 model=gpt-3.5-turbo api=http://localhost:7860
-[STEP]  step=1 decision=block confidence=0.92 reward=0.4830 trust=101.0 fatigue=0.0 threat=phishing
-[STEP]  step=2 decision=allow confidence=0.88 reward=0.3150 trust=101.2 fatigue=0.0 threat=safe
+[START] task=basic_security env=SecureAI-Guard model=gpt-4o-mini
+[STEP] step=1 action=block reward=0.48 done=false error=null
+[STEP] step=2 action=allow reward=0.32 done=false error=null
 ...
-[END]   task=basic_security episode=1 steps=50 total_reward=18.4200 score=0.7841 grade=B
+[END] success=true steps=50 score=0.78 rewards=0.48,0.32,...
 ```
 
 ---
@@ -314,7 +317,7 @@ docker run -p 7860:7860 secureai-guard
 1. Create a new Space (Docker SDK)
 2. Push this repository
 3. The `Dockerfile` exposes port 7860 — HF Spaces will map it automatically
-4. Set optional secrets: `HF_TOKEN`, `OPENAI_API_KEY`
+4. Set optional secrets: `HF_TOKEN` and, if needed, `API_KEY`
 
 ### Resource requirements
 
@@ -369,11 +372,11 @@ DQN agent (500 episodes training):
 
 | Variable | Default | Description |
 |---|---|---|
-| `API_BASE_URL` | `http://localhost:7860` | Environment server URL |
+| `API_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible LLM endpoint |
 | `MODEL_NAME` | `gpt-3.5-turbo` | LLM model name |
-| `HF_TOKEN` | — | HuggingFace token |
-| `OPENAI_API_KEY` | — | OpenAI API key |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible base URL |
+| `HF_TOKEN` | — | Token/API key for the LLM endpoint |
+| `API_KEY` | — | Optional alias for the LLM API key |
+| `ENV_URL` | `http://localhost:7860` | Environment server URL |
 | `HF_RISK_MODEL` | `distilbert-base-uncased-finetuned-sst-2-english` | Risk scorer model |
 | `EPISODES_PER_TASK` | `1` | Episodes per task in inference.py |
 | `SEED_BASE` | `42` | Base seed for reproducibility |
