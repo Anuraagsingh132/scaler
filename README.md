@@ -1,3 +1,12 @@
+---
+title: Scaler
+emoji: 🏆
+colorFrom: purple
+colorTo: purple
+sdk: docker
+pinned: false
+---
+
 # 🛡️ SecureAI-Guard: Stateful POMDP for Autonomous Digital Defense
 
 [![OpenEnv](https://img.shields.io/badge/OpenEnv-compliant-blue)](https://openenv.ai)
