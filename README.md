@@ -1,11 +1,4 @@
----
-title: Scaler
-emoji: 🏆
-colorFrom: purple
-colorTo: purple
-sdk: docker
-pinned: false
----
+
 
 # 🛡️ SecureAI-Guard: Stateful POMDP for Autonomous Digital Defense
 
