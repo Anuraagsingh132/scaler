@@ -7,7 +7,7 @@ import os
 import sys
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -119,16 +119,18 @@ async def mcp(payload: Optional[Dict[str, Any]] = None):
 
 
 @app.post("/reset")
-async def reset(request: ResetRequest):
+async def reset(request: Optional[ResetRequest] = Body(default=None)):
     """Reset environment. Returns first observation."""
     global _episode_rewards, _current_task_id
 
-    _current_task_id = request.task_id or "basic_security"
+    task_id = (request.task_id if request else None) or "basic_security"
+    seed = (request.seed if request else None)
+    _current_task_id = task_id
     _episode_rewards = []
 
     try:
-        observation = env.reset(seed=request.seed, task_id=_current_task_id)
-        logger.info("Episode reset | task=%s seed=%s", _current_task_id, request.seed)
+        observation = env.reset(seed=seed, task_id=_current_task_id)
+        logger.info("Episode reset | task=%s seed=%s", _current_task_id, seed)
         return {
             "observation": observation.model_dump(),
             "state": env.get_state().model_dump(),
